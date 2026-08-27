@@ -28,7 +28,7 @@ jobs:
           ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
         run: python3 scripts/fetch_jobs.py
 
-            - name: Commit results
+      - name: Commit results
         run: |
           git config user.name "job-search-bot"
           git config user.email "actions@users.noreply.github.com"
