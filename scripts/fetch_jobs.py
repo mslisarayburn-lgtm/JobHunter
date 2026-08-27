@@ -45,6 +45,23 @@ MAX_DAYS_OLD = 3  # daily run, so only need very recent postings
 SEEN_FILE = "seen_urls.json"
 OUTPUT_FILE = "latest_results.json"
 
+# ---------- Title gate ----------
+# Adzuna's `what=` search matches full text (title + description), not just
+# the title -- so a "Senior Software Engineer" posting that happens to
+# mention "product roadmap" in its description would otherwise slip through.
+# Require the ACTUAL title to look like a real product role before scoring
+# it at all, and explicitly exclude adjacent-but-different disciplines
+# (product marketing, product design).
+TITLE_GATE_PATTERN = re.compile(
+    r"\b(product manager|product owner|product lead|head of product|"
+    r"director of product|group product manager|principal product manager|"
+    r"product delivery manager)\b",
+    re.IGNORECASE,
+)
+TITLE_EXCLUDE_PATTERN = re.compile(
+    r"\b(product marketing|product designer|product design)\b", re.IGNORECASE
+)
+
 # ---------- Fit-scoring rubric ----------
 # Derived from patterns already established in Application Tracker Database v2.xlsx.
 # This is a triage heuristic, not a verified JD match -- rows land as
@@ -147,9 +164,18 @@ def save_seen(seen):
         json.dump(sorted(seen), f, indent=2)
 
 
+def dedupe_key(title: str, company: str) -> str:
+    # Same role posted once per city shows up as near-identical titles;
+    # collapse "Product Manager - Sydney" / "Product Manager - Melbourne"
+    # etc. down to one row per (role, company).
+    base_title = title.lower().split(" - ")[0].split(",")[0].strip()
+    return f"{base_title}::{company.lower().strip()}"
+
+
 def main():
     seen = load_seen()
     candidates = {}
+    dedupe_seen = set()
 
     for query in TARGET_TITLES:
         try:
@@ -162,7 +188,18 @@ def main():
             if not url or url in seen:
                 continue
             title = job.get("title", "").strip()
+
+            if not TITLE_GATE_PATTERN.search(title) or TITLE_EXCLUDE_PATTERN.search(title):
+                seen.add(url)  # don't re-evaluate this exact listing again either
+                continue
+
             company = (job.get("company") or {}).get("display_name", "").strip()
+            dkey = dedupe_key(title, company)
+            if dkey in dedupe_seen:
+                seen.add(url)
+                continue
+            dedupe_seen.add(dkey)
+
             location = (job.get("location") or {}).get("display_name", "").strip()
             description = job.get("description", "").strip()
             created = job.get("created", "")
