@@ -9,6 +9,10 @@ on:
     - cron: "0 20 * * *"
   workflow_dispatch: {}
 
+concurrency:
+  group: daily-job-search
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -32,8 +36,28 @@ jobs:
         run: |
           git config user.name "job-search-bot"
           git config user.email "actions@users.noreply.github.com"
-          git fetch origin main
-          git reset --mixed origin/main
-          git add latest_results.json seen_urls.json
-          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Daily job search results $(date -u +%F)"
-          git push origin HEAD:main
+
+          for i in 1 2 3 4 5; do
+            git fetch origin main
+            git reset --mixed origin/main
+            git add latest_results.json seen_urls.json
+
+            if git diff --cached --quiet; then
+              echo "No changes to commit"
+              exit 0
+            fi
+
+            git commit -m "Daily job search results $(date -u +%F) (attempt $i)"
+
+            if git push origin HEAD:main; then
+              echo "Pushed successfully on attempt $i"
+              exit 0
+            fi
+
+            echo "Push failed on attempt $i, retrying..."
+            git reset --soft HEAD~1
+            sleep $((RANDOM % 5 + 2))
+          done
+
+          echo "Failed to push after 5 attempts"
+          exit 1
